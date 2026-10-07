@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getSubject, subjects } from './data/index.js';
 
-const STORAGE_KEY = 'simple-exam-attempt-v1';
+const STORAGE_KEY = 'simple-exam-attempt-v2';
 const EXAM_LENGTH_MS = 60 * 60 * 1000;
 const LETTERS = ['A', 'B', 'C', 'D'];
 
@@ -40,6 +40,7 @@ function formatTime(milliseconds) {
 export default function App() {
   const [attempt, setAttempt] = useState(readSavedAttempt);
   const [now, setNow] = useState(Date.now);
+  const [showSubmitConfirmation, setShowSubmitConfirmation] = useState(false);
 
   useEffect(() => {
     if (attempt) localStorage.setItem(STORAGE_KEY, JSON.stringify(attempt));
@@ -75,36 +76,34 @@ export default function App() {
       subjectId: subject.id,
       status: 'active',
       startedAt: Date.now(),
-      currentIndex: 0,
       answers: Array(subject.multipleChoice.length).fill(null),
       writtenAnswers: Array(subject.descriptive.length).fill(''),
     });
   }
 
   function submitExam() {
-    if (window.confirm('Are you sure you want to submit?')) {
-      setAttempt((current) => completeAttempt(current));
-    }
+    setShowSubmitConfirmation(true);
   }
 
-  function updateAnswer(letter) {
+  function confirmSubmit() {
+    setAttempt((current) => completeAttempt(current));
+    setShowSubmitConfirmation(false);
+  }
+
+  function updateAnswer(index, letter) {
     setAttempt((current) => {
       const answers = [...current.answers];
-      answers[current.currentIndex] = letter;
+      answers[index] = letter;
       return { ...current, answers };
     });
   }
 
-  function updateWrittenAnswer(value) {
+  function updateWrittenAnswer(index, value) {
     setAttempt((current) => {
       const writtenAnswers = [...current.writtenAnswers];
-      writtenAnswers[current.currentIndex - subject.multipleChoice.length] = value;
+      writtenAnswers[index] = value;
       return { ...current, writtenAnswers };
     });
-  }
-
-  function goToQuestion(index) {
-    setAttempt((current) => ({ ...current, currentIndex: index }));
   }
 
   if (!attempt) {
@@ -168,11 +167,6 @@ export default function App() {
 
   const multipleChoiceCount = subject.multipleChoice.length;
   const totalQuestions = multipleChoiceCount + subject.descriptive.length;
-  const index = Math.min(Math.max(attempt.currentIndex ?? 0, 0), totalQuestions - 1);
-  const isWritten = index >= multipleChoiceCount;
-  const question = isWritten
-    ? subject.descriptive[index - multipleChoiceCount]
-    : subject.multipleChoice[index];
   const answeredCount = attempt.answers.filter(Boolean).length
     + attempt.writtenAnswers.filter((answer) => answer.trim().length > 0).length;
   const remaining = Math.max(0, attempt.startedAt + EXAM_LENGTH_MS - now);
@@ -182,7 +176,7 @@ export default function App() {
       <header className="exam-header">
         <div>
           <p className="eyebrow">{subject.title} exam</p>
-          <h1>Question {index + 1} of {totalQuestions}</h1>
+          <h1>All Questions</h1>
         </div>
         <div className="timer" role="timer" aria-label={`Time remaining ${formatTime(remaining)}`}>
           <span>Time remaining</span>
@@ -199,48 +193,50 @@ export default function App() {
       </div>
 
       <div className="exam-layout">
-        <section className="panel question-panel" aria-labelledby="question-title">
-          <p className="question-type">{isWritten ? 'Descriptive question' : 'Multiple choice'}</p>
-          <h2 id="question-title">{question.text}</h2>
+        <section className="question-list" aria-label="Exam questions">
+          {subject.multipleChoice.map((question, index) => (
+            <article className="panel question-panel" id={`question-${index + 1}`} key={question.id} aria-labelledby={`question-title-${index + 1}`}>
+              <p className="question-type">Question {index + 1} of {totalQuestions} · Multiple choice</p>
+              <h2 id={`question-title-${index + 1}`}>{question.text}</h2>
+              <div className="options" role="radiogroup" aria-labelledby={`question-title-${index + 1}`}>
+                {question.options.map((option, optionIndex) => {
+                  const letter = LETTERS[optionIndex];
+                  const selected = attempt.answers[index] === letter;
+                  return (
+                    <label className={`option ${selected ? 'selected' : ''}`} key={letter}>
+                      <input
+                        type="radio"
+                        name={`question-${index + 1}`}
+                        value={letter}
+                        checked={selected}
+                        onChange={() => updateAnswer(index, letter)}
+                      />
+                      <span className="option-letter">{letter}</span>
+                      <span>{option}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </article>
+          ))}
 
-          {isWritten ? (
-            <label className="written-answer">
-              <span>Your answer</span>
-              <textarea
-                value={attempt.writtenAnswers[index - multipleChoiceCount]}
-                onChange={(event) => updateWrittenAnswer(event.target.value)}
-                placeholder="Type your answer here..."
-                rows="9"
-              />
-            </label>
-          ) : (
-            <div className="options" role="radiogroup" aria-label="Answer choices">
-              {question.options.map((option, optionIndex) => {
-                const letter = LETTERS[optionIndex];
-                const selected = attempt.answers[index] === letter;
-                return (
-                  <label className={`option ${selected ? 'selected' : ''}`} key={letter}>
-                    <input
-                      type="radio"
-                      name={`question-${index}`}
-                      value={letter}
-                      checked={selected}
-                      onChange={() => updateAnswer(letter)}
-                    />
-                    <span className="option-letter">{letter}</span>
-                    <span>{option}</span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
+          {subject.descriptive.map((question, index) => (
+            <article className="panel question-panel" id={`question-${multipleChoiceCount + index + 1}`} key={question.id} aria-labelledby={`question-title-${multipleChoiceCount + index + 1}`}>
+              <p className="question-type">Question {multipleChoiceCount + index + 1} of {totalQuestions} · Descriptive</p>
+              <h2 id={`question-title-${multipleChoiceCount + index + 1}`}>{question.text}</h2>
+              <label className="written-answer">
+                <span>Your answer</span>
+                <textarea
+                  value={attempt.writtenAnswers[index]}
+                  onChange={(event) => updateWrittenAnswer(index, event.target.value)}
+                  placeholder="Type your answer here..."
+                  rows="9"
+                />
+              </label>
+            </article>
+          ))}
 
-          <div className="question-actions">
-            <button className="button secondary-button" disabled={index === 0} onClick={() => goToQuestion(index - 1)}>Previous</button>
-            {index < totalQuestions - 1 && (
-              <button className="button primary-button" onClick={() => goToQuestion(index + 1)}>Next</button>
-            )}
-          </div>
+          <button className="button primary-button finish-button" onClick={submitExam}>Submit Exam</button>
         </section>
 
         <aside className="panel navigator-panel" aria-label="Question navigation">
@@ -254,22 +250,33 @@ export default function App() {
                 ? Boolean(attempt.answers[questionIndex])
                 : attempt.writtenAnswers[questionIndex - multipleChoiceCount].trim().length > 0;
               return (
-                <button
+                <a
                   key={questionIndex}
-                  className={`question-number ${questionIndex === index ? 'current' : ''} ${answered ? 'answered' : ''}`}
+                  href={`#question-${questionIndex + 1}`}
+                  className={`question-number ${answered ? 'answered' : ''}`}
                   aria-label={`Question ${questionIndex + 1}${answered ? ', answered' : ''}`}
-                  aria-current={questionIndex === index ? 'step' : undefined}
-                  onClick={() => goToQuestion(questionIndex)}
                 >
                   {questionIndex + 1}
-                </button>
+                </a>
               );
             })}
           </div>
           <div className="navigator-legend"><span className="legend-dot" /> Answered</div>
-          <button className="button submit-button" onClick={submitExam}>Submit Exam</button>
         </aside>
       </div>
+
+      {showSubmitConfirmation && (
+        <div className="confirmation-overlay">
+          <div className="confirmation-panel" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+            <h2 id="confirmation-title">Are you sure you want to submit?</h2>
+            <p>You can no longer change your answers after submission.</p>
+            <div className="confirmation-actions">
+              <button className="button secondary-button" onClick={() => setShowSubmitConfirmation(false)}>Cancel</button>
+              <button className="button primary-button" onClick={confirmSubmit}>Submit Exam</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
